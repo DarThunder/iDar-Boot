@@ -1,4 +1,4 @@
-local loom = require("iDar.opt.Loom.src.core")
+local loom = require("iDar.opt.Loom.core")
 
 local boot = {}
 local hardware_file = nil
@@ -8,10 +8,10 @@ local function derive_mac()
     local seed = os.getComputerID() * 0xE11F8FB4
     local bytes = {}
     for i = 1, 6 do
-        seed = (seed * 1103515245 + 12345) & 0xFFFFFFFF
-        bytes[i] = seed & 0xFF
+        seed = bit.band((seed * 1103515245 + 12345), 0xFFFFFFFF)
+        bytes[i] = bit.band(seed, 0xFF)
     end
-    bytes[1] = (bytes[1] & 0xFE) | 0x02
+    bytes[1] = bit.bor(bit.band(bytes[1], 0xFE), 0x02)
     return string.format('%02x:%02x:%02x:%02x:%02x:%02x', table.unpack(bytes))
 end
 
@@ -102,7 +102,7 @@ end
 init_system()
 _G.iDarBoot = boot
 
-loom.launch("/boot/src/init.lua")
+loom.launch("/boot/init.lua")
 
 term.clear()
 term.setCursorPos(1, 1)
