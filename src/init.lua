@@ -15,17 +15,13 @@ if f then
     end
 end
 
-print("Starting TTY Daemon...")
-sys.spawn("/boot/tty_daemon.lua")
-
 while true do
-    print("Starting Shell session...")
-    local shell_pid = sys.spawn("/opt/Shell/shell.lua")
+    print("Starting TTY Daemon (Multiplexer)...")
 
-    sys.set_foreground(shell_pid)
-    sys.wait(shell_pid)
-    sys.set_foreground(sys.get_pid())
+    local daemon_pid = sys.spawn("/boot/tty_daemon.lua", { uid = 0, superrr = 2 })
 
-    print("Shell exited. Respawning in 1 second...")
+    sys.wait(daemon_pid)
+
+    print("CRITICAL: TTY Daemon exited or crashed! Respawning in 1 second...")
     sleep(1)
 end

@@ -66,13 +66,6 @@ local function get_config()
     auto_file = textutils.unserialize(config)
 end
 
-function boot.register(service_name, config)
-    if not auto_file or type(auto_file) ~= "table" then return false end
-    auto_file[service_name] = config
-    save_config()
-    return true
-end
-
 function boot.getMac()
     if not hardware_file or type(hardware_file) ~= "table" then return nil end
     return hardware_file.mac_address

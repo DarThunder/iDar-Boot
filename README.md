@@ -1,13 +1,13 @@
 # iDar-Boot
 
-![State: Alpha 1](https://img.shields.io/badge/State-Alpha_1-blue)
+![State: Alpha 2](https://img.shields.io/badge/State-Alpha_2-orange)
 ![License](https://img.shields.io/badge/licencia-MIT-green)
 
 **The master boot record, initialization system, and hardware manager for iDar-OS.**
 
-**iDar-Boot** is the foundational pillar of the iDar ecosystem. It is responsible for bridging the gap between ComputerCraft's raw hardware and the [iDar-Loom](https://github.com/DarThunder/iDar-Loom) kernel. It acts as both the bootloader (MBR) and the first user-space process (`init` / PID 1), managing system startup, background services, and the TTY daemon.
+**iDar-Boot** is the foundational pillar of the iDar ecosystem. It is responsible for bridging the gap between ComputerCraft's raw hardware and the [iDar-Loom](https://github.com/DarThunder/iDar-Loom) microkernel. It acts as both the bootloader (MBR) and the first user-space process (`init` / PID 1), managing system startup, background services, and the crucial TTY input daemon.
 
-Rather than just loading the OS, iDar-Boot simulates a real physical machine by generating persistent hardware identifiers (like pseudo-random MAC addresses) and managing services that run silently in the background.
+Rather than just loading the OS, iDar-Boot simulates a real physical machine by generating persistent hardware identifiers (like pseudo-random MAC addresses) and managing the OS's foreground focus architecture.
 
 ## Table of Contents
 
@@ -22,10 +22,10 @@ Rather than just loading the OS, iDar-Boot simulates a real physical machine by 
 
 ## Features
 
-- **True `init` System (PID 1)**: Manages the lifecycle of the operating system. If the shell crashes, the `init` process automatically respawns it, preventing the system from freezing.
+- **True `init` System (PID 1)**: Manages the lifecycle of the operating system. If the shell crashes, the `init` process catches the exit signal and automatically respawns it, preventing the system from freezing.
 - **Hardware Simulation**: Automatically generates and persists unique hardware configurations, including a deterministic, pseudo-random MAC Address derived from the internal Computer ID.
-- **Service Autostart**: Easily register background services and daemons to start automatically when the computer boots.
-- **TTY Daemon Integration**: Initializes the terminal multiplexer and input daemon required by [`iDar-Shell`](https://github.com/DarThunder/iDar-Shell) to read keystrokes safely.
+- **Service Autostart**: Seamlessly launches background services and daemons to start automatically when the computer boots via the VFS sandbox.
+- **Secure TTY Input Multiplexer**: Initializes the `tty_daemon`. This critical background service intercepts raw keyboard events and securely routes them _only_ to the process currently holding foreground focus, ensuring background apps cannot steal your keystrokes.
 
 ## Installation
 
@@ -33,6 +33,7 @@ Assuming you are using [**iDar-Pacman**](https://github.com/DarThunder/iDar-Pacm
 
 ```bash
 pacman -S idar-boot
+
 ```
 
 _(Note: iDar-Boot is typically installed automatically by the iDar-OS Bootstrap Utility. Manual installation is only recommended for system recovery or upgrade)._
@@ -44,12 +45,12 @@ iDar-Boot consists of three highly specialized components that hand over control
 ### The Boot Sequence
 
 1. **BIOS / UEFI (`startup.lua`)**: The native ComputerCraft startup script executes `MBR.lua`.
-2. **Bootloader (`MBR.lua`)**: Initializes the `/etc/hardware.conf` file, generates the MAC address, and loads the **iDar-Loom** kernel into memory, surrendering control.
-3. **Initialization (`init.lua`)**: Running natively inside the Loom sandbox as PID 1, `init` reads `/etc/autostart.conf`, launches all registered background services, starts `tty_daemon.lua`, and finally spawns the user shell.
+2. **Bootloader (`MBR.lua`)**: Initializes the `/iDar/etc/hardware.conf` file, generates the MAC address, and loads the **iDar-Loom** kernel into memory. It then registers the read-only `_G.iDarBoot` global API and surrenders the main thread to `loom.execute()`.
+3. **Initialization (`init.lua`)**: Running natively inside the Loom sandbox as PID 1 with **UID 0 (root)** privileges, `init` securely reads `/etc/autostart.conf` using virtual syscalls, launches all registered background services, starts the `tty_daemon.lua` multiplexer, and finally spawns the user shell (granting it foreground focus).
 
 ## Developer API
 
-iDar-Boot exposes a global API (`_G.iDarBoot`) during the boot process so other packages can register services or query hardware information.
+iDar-Boot exposes a read-only global API (`_G.iDarBoot`) during the boot process so other packages can safely query hardware information without compromising system security.
 
 ```lua
 -- Query the generated MAC Address for networking packages
@@ -60,28 +61,27 @@ print("My MAC is: " .. mac)
 local hw_info = _G.iDarBoot.getHardware()
 print("Computer Label: " .. hw_info.computer_label)
 
--- Register a background daemon to start automatically on next boot
--- Usage: register(service_name, executable_path)
-_G.iDarBoot.register("my_web_server", "/opt/my_server/main.lua")
 ```
+
+_(Security Note: Service registration via `_G` has been deprecated in Alpha 2 to prevent Ring 3 privilege escalation. Services must now be registered directly through the VFS using elevated privileges)._
 
 ## Configuration Files
 
 iDar-Boot manages the following system files:
 
-- `/etc/hardware.conf`: A serialized table containing the `computer_id`, `computer_label`, `mac_address`, and creation timestamp. **Do not edit this file manually.** (or do whatever you want, it's your pc after all)
-- `/etc/autostart.conf`: A key-value table of services that `init.lua` will spawn on boot. You can safely add your own scripts here using the Developer API.
+- `/iDar/etc/hardware.conf`: A serialized table containing the `computer_id`, `computer_label`, `mac_address`, and creation timestamp. **Do not edit this file manually.** (or do whatever you want, it's your pc after all)
+- `/iDar/etc/autostart.conf`: A key-value table of services that `init.lua` will spawn on boot.
 
 ## FAQ
 
 **Q: Can I use iDar-Boot without iDar-Loom?**
-A: No. `MBR.lua` strictly requires `iDar-Loom` to launch the kernel, and `init.lua` relies entirely on Loom's virtual system calls (`sys.spawn`, `sys.wait`). They are deeply coupled.
+A: No. `MBR.lua` strictly requires `iDar-Loom` to launch the kernel, and `init.lua` relies entirely on Loom's virtual system calls (`sys.spawn`, `sys.wait`, `sys.set_foreground`). They are deeply coupled.
 
 **Q: My shell froze and crashed. Why didn't the computer turn off?**
 A: Because `init.lua` is doing its job! Just like in a real Unix system, if the foreground shell dies, the PID 1 process catches the exit signal and respawns a new shell session automatically.
 
 **Q: How do I stop a service from auto-starting?**
-A: Currently, you need to write a small script that reads `/etc/autostart.conf`, removes the key corresponding to the service, and serializes the table back to the file. (A CLI utility for `systemctl`-like behavior is planned for the future).
+A: Currently, you need to write a small script that reads `/etc/autostart.conf`, removes the key corresponding to the service, and serializes the table back to the file. **Important:** Because of iDar-Loom's strict Ring 3 sandboxing, this script must be executed with elevated privileges (`sys.sudo`) to write to the `/etc/` directory. (A CLI utility for `systemctl`-like behavior is planned for the future).
 
 ## License
 
